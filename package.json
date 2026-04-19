@@ -1,0 +1,8 @@
+{
+  "name": "shopify-bridge",
+  "version": "1.0.0",
+  "main": "shopify-bridge-single.js",
+  "scripts": {
+    "start": "node shopify-bridge-single.js"
+  }
+}
