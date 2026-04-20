@@ -5,13 +5,14 @@
   "type": "module",
   "main": "shopify-bridge-single.js",
   "scripts": {
-    "start": "node shopify-bridge-single.js"
+    "start": "node shopify-bridge-single.js",
+    "dev": "node --watch shopify-bridge-single.js",
+    "smoke": "bash ./scripts/smoke-test.sh"
   },
   "dependencies": {
-    "express": "^4.21.2",
-    "node-fetch": "^3.3.2"
+    "express": "^4.21.2"
   },
   "engines": {
-    "node": "22.x"
+    "node": ">=22"
   }
 }
