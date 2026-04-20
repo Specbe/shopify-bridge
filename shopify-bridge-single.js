@@ -11,170 +11,85 @@ const {
   BRIDGE_API_KEY
 } = process.env;
 
-function fail(message, extra = {}, status = 400) {
-  return { ok: false, error: message, ...extra, status };
+if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ACCESS_TOKEN) {
+  console.error("❌ Missing required env variables");
+  process.exit(1);
 }
 
-function ok(data) {
-  return { ok: true, ...data };
-}
+const SHOPIFY_URL = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
 async function shopifyGraphQL(query, variables = {}) {
-  const res = await fetch(
-    `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN
-      },
-      body: JSON.stringify({ query, variables })
-    }
-  );
+  const res = await fetch(SHOPIFY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN
+    },
+    body: JSON.stringify({ query, variables })
+  });
 
   const json = await res.json();
-  if (json.errors) throw new Error(JSON.stringify(json.errors));
+
+  if (json.errors) {
+    throw new Error(JSON.stringify(json.errors));
+  }
+
   return json.data;
 }
 
 app.post("/command", async (req, res) => {
   try {
-    const apiKey = req.headers["x-bridge-api-key"];
-    if (apiKey !== BRIDGE_API_KEY) {
-      return res.status(401).json(fail("Unauthorized"));
+    const key = req.headers["x-bridge-api-key"];
+    if (key !== BRIDGE_API_KEY) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
     const { command } = req.body;
-    const parts = command.split(" ");
 
-    // =========================
-    // HEALTH
-    // =========================
     if (command === "health-shopify") {
-      const data = await shopifyGraphQL(`{ shop { name } }`);
-      return res.json(ok({ shop: data.shop }));
+      const data = await shopifyGraphQL(`{
+        shop { name }
+      }`);
+
+      return res.json({ ok: true, shop: data.shop });
     }
 
-    // =========================
-    // PRODUCTS
-    // =========================
-    if (parts[0] === "products") {
-      const first = parts[1] || 5;
+    if (command.startsWith("set-price-auto")) {
+      const [, productId, price] = command.split(" ");
+
       const data = await shopifyGraphQL(`
-        {
-          products(first: ${first}) {
-            edges {
-              node {
-                id
-                title
-                variants(first:1){
-                  edges{
-                    node{
-                      id
-                      price
-                    }
-                  }
-                }
-              }
+        query ($id: ID!) {
+          product(id: $id) {
+            variants(first: 1) {
+              nodes { id }
             }
           }
         }
-      `);
+      `, { id: productId });
 
-      return res.json(ok({ products: data.products.edges }));
+      const variantId = data.product.variants.nodes[0].id;
+
+      await shopifyGraphQL(`
+        mutation ($id: ID!, $price: Money!) {
+          productVariantUpdate(input: {
+            id: $id,
+            price: $price
+          }) {
+            productVariant { id }
+            userErrors { message }
+          }
+        }
+      `, { id: variantId, price });
+
+      return res.json({ ok: true, variantId, price });
     }
 
-    // =========================
-    // SET PRICE (DIRECT VARIANT)
-    // =========================
-    if (parts[0] === "set-price") {
-      const variantId = parts[1];
-      const price = parts[2];
+    return res.json({ ok: false, error: "Unknown command" });
 
-      const data = await shopifyGraphQL(
-        `
-        mutation ($input: ProductVariantInput!) {
-          productVariantUpdate(input: $input) {
-            productVariant {
-              id
-              price
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `,
-        {
-          input: {
-            id: variantId,
-            price: price
-          }
-        }
-      );
-
-      return res.json(ok(data.productVariantUpdate));
-    }
-
-    // =========================
-    // SET PRICE AUTO (PRODUCT)
-    // =========================
-    if (parts[0] === "set-price-auto") {
-      const productId = parts[1];
-      const price = parts[2];
-
-      const data = await shopifyGraphQL(
-        `
-        {
-          product(id: "${productId}") {
-            variants(first:1){
-              edges{
-                node{
-                  id
-                }
-              }
-            }
-          }
-        }
-      `
-      );
-
-      const variantId =
-        data.product.variants.edges[0].node.id;
-
-      const update = await shopifyGraphQL(
-        `
-        mutation ($input: ProductVariantInput!) {
-          productVariantUpdate(input: $input) {
-            productVariant {
-              id
-              price
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `,
-        {
-          input: {
-            id: variantId,
-            price: price
-          }
-        }
-      );
-
-      return res.json(ok(update.productVariantUpdate));
-    }
-
-    return res.json(fail("Unknown command"));
   } catch (err) {
-    return res.status(500).json(fail(err.message));
+    console.error(err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-app.listen(3000, () => {
-  console.log("Bridge running");
-});
+app.listen(3000, () => console.log("🚀 Bridge running"));
