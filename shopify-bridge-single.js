@@ -10,11 +10,11 @@ const API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("OK");
+  return res.status(200).send("OK");
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "alive" });
+  return res.status(200).json({ status: "alive" });
 });
 
 app.post("/command", async (req, res) => {
