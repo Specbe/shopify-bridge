@@ -1,8 +1,15 @@
 import express from "express";
 import fetch from "node-fetch";
 
+console.log("Bridge starting...");
+
 const app = express();
 app.use(express.json());
+
+app.use((req, res, next) => {
+  console.log("Incoming:", req.method, req.url);
+  next();
+});
 
 const SHOP = process.env.SHOPIFY_STORE_DOMAIN;
 const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -34,7 +41,7 @@ app.post("/command", async (req, res) => {
     }
 
     if (action === "health-shopify") {
-      return res.json({
+      return res.status(200).json({
         status: "ok",
         shop: SHOP,
         api_version: API_VERSION
