@@ -3,14 +3,9 @@ const { URL } = require("url");
 
 const PORT = Number(process.env.PORT || 8787);
 const STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
-const API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-04";
-const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
-const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
+const API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-04";
+const ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY;
-const TOKEN_REFRESH_BUFFER_MS = Number(process.env.TOKEN_REFRESH_BUFFER_MS || 300000);
-
-let cachedToken = null;
-let tokenExpiresAt = 0;
 
 function json(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -30,8 +25,7 @@ function requireEnv() {
   const missing = [];
   for (const [key, value] of Object.entries({
     SHOPIFY_STORE_DOMAIN: STORE_DOMAIN,
-    SHOPIFY_CLIENT_ID: CLIENT_ID,
-    SHOPIFY_CLIENT_SECRET: CLIENT_SECRET,
+    SHOPIFY_ACCESS_TOKEN: ADMIN_ACCESS_TOKEN,
     BRIDGE_API_KEY
   })) {
     if (!value) missing.push(key);
@@ -41,45 +35,14 @@ function requireEnv() {
   }
 }
 
-async function mintAccessToken() {
-  requireEnv();
-
-  const now = Date.now();
-  if (cachedToken && now < tokenExpiresAt - TOKEN_REFRESH_BUFFER_MS) {
-    return cachedToken;
-  }
-
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET
-  });
-
-  const resp = await fetch(`https://${STORE_DOMAIN}/admin/oauth/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
-
-  const data = await resp.json().catch(() => ({}));
-
-  if (!resp.ok || !data.access_token) {
-    throw new Error(`Token request failed: ${resp.status} ${JSON.stringify(data)}`);
-  }
-
-  cachedToken = data.access_token;
-  tokenExpiresAt = Date.now() + (23 * 60 * 60 * 1000);
-  return cachedToken;
-}
-
 async function shopifyGraphQL(query, variables = {}) {
-  const token = await mintAccessToken();
+  requireEnv();
 
   const resp = await fetch(`https://${STORE_DOMAIN}/admin/api/${API_VERSION}/graphql.json`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": token
+      "X-Shopify-Access-Token": ADMIN_ACCESS_TOKEN
     },
     body: JSON.stringify({ query, variables })
   });
@@ -89,17 +52,21 @@ async function shopifyGraphQL(query, variables = {}) {
   if (!resp.ok) {
     throw new Error(`Shopify GraphQL HTTP error: ${resp.status} ${JSON.stringify(data)}`);
   }
+
   if (data.errors) {
     throw new Error(`Shopify GraphQL errors: ${JSON.stringify(data.errors)}`);
   }
+
   return data.data;
 }
 
 function productGid(id) {
+  if (String(id).startsWith("gid://")) return String(id);
   return `gid://shopify/Product/${id}`;
 }
 
 function variantGid(id) {
+  if (String(id).startsWith("gid://")) return String(id);
   return `gid://shopify/ProductVariant/${id}`;
 }
 
@@ -150,6 +117,7 @@ async function handleCommand(raw) {
     const rest = command.replace(/^set-title\s+/, "");
     const firstSpace = rest.indexOf(" ");
     if (firstSpace === -1) throw new Error("Use: set-title PRODUCT_ID New Title");
+
     const id = rest.slice(0, firstSpace).trim();
     const title = rest.slice(firstSpace + 1).trim();
 
@@ -182,6 +150,7 @@ async function handleCommand(raw) {
     const rest = command.replace(/^set-tags\s+/, "");
     const firstSpace = rest.indexOf(" ");
     if (firstSpace === -1) throw new Error("Use: set-tags PRODUCT_ID tag1, tag2");
+
     const id = rest.slice(0, firstSpace).trim();
     const tagsRaw = rest.slice(firstSpace + 1).trim();
     const tags = tagsRaw.split(",").map(s => s.trim()).filter(Boolean);
@@ -214,6 +183,7 @@ async function handleCommand(raw) {
     const rest = command.replace(/^set-price\s+/, "").trim();
     const parts = rest.split(/\s+/);
     if (parts.length < 2) throw new Error("Use: set-price VARIANT_ID PRICE");
+
     const variantId = parts[0];
     const price = parts[1];
 
