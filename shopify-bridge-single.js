@@ -4,92 +4,56 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
-const {
-  SHOPIFY_STORE_DOMAIN,
-  SHOPIFY_API_VERSION,
-  SHOPIFY_ACCESS_TOKEN,
-  BRIDGE_API_KEY
-} = process.env;
+const SHOP = process.env.SHOPIFY_STORE_DOMAIN;
+const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
 
-if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ACCESS_TOKEN) {
-  console.error("❌ Missing required env variables");
-  process.exit(1);
-}
+app.get("/", (req, res) => {
+  res.send("OK");
+});
 
-const SHOPIFY_URL = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
-
-async function shopifyGraphQL(query, variables = {}) {
-  const res = await fetch(SHOPIFY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN
-    },
-    body: JSON.stringify({ query, variables })
-  });
-
-  const json = await res.json();
-
-  if (json.errors) {
-    throw new Error(JSON.stringify(json.errors));
-  }
-
-  return json.data;
-}
+app.get("/health", (req, res) => {
+  res.json({ status: "alive" });
+});
 
 app.post("/command", async (req, res) => {
   try {
-    const key = req.headers["x-bridge-api-key"];
-    if (key !== BRIDGE_API_KEY) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const { action, payload } = req.body;
+
+    if (!action) {
+      return res.status(400).json({ error: "Missing action" });
     }
 
-    const { command } = req.body;
-
-    if (command === "health-shopify") {
-      const data = await shopifyGraphQL(`{
-        shop { name }
-      }`);
-
-      return res.json({ ok: true, shop: data.shop });
+    // HEALTH CHECK
+    if (action === "health-shopify") {
+      return res.json({ status: "ok" });
     }
 
-    if (command.startsWith("set-price-auto")) {
-      const [, productId, price] = command.split(" ");
-
-      const data = await shopifyGraphQL(`
-        query ($id: ID!) {
-          product(id: $id) {
-            variants(first: 1) {
-              nodes { id }
-            }
-          }
+    // CREATE PRODUCT
+    if (action === "create_product") {
+      const response = await fetch(
+        `https://${SHOP}/admin/api/${API_VERSION}/products.json`,
+        {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": TOKEN,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ product: payload }),
         }
-      `, { id: productId });
+      );
 
-      const variantId = data.product.variants.nodes[0].id;
-
-      await shopifyGraphQL(`
-        mutation ($id: ID!, $price: Money!) {
-          productVariantUpdate(input: {
-            id: $id,
-            price: $price
-          }) {
-            productVariant { id }
-            userErrors { message }
-          }
-        }
-      `, { id: variantId, price });
-
-      return res.json({ ok: true, variantId, price });
+      const data = await response.json();
+      return res.json(data);
     }
 
-    return res.json({ ok: false, error: "Unknown command" });
-
+    return res.status(400).json({ error: "Unknown action" });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(3000, () => console.log("🚀 Bridge running"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
+});
