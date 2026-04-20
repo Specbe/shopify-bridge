@@ -1,13 +1,17 @@
 {
   "name": "shopify-bridge",
   "version": "1.0.0",
-  "main": "shopify-bridge-single.js",
+  "private": true,
   "type": "module",
+  "main": "shopify-bridge-single.js",
   "scripts": {
     "start": "node shopify-bridge-single.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "express": "^4.21.2",
     "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
