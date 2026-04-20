@@ -1,0 +1,122 @@
+{
+  "info": {
+    "name": "Shopify Bridge API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://shopify-bridge-3yor.onrender.com"
+    },
+    {
+      "key": "bridgeApiKey",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "GET /",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/"
+      }
+    },
+    {
+      "name": "GET /health",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "POST /command ping",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "x-bridge-api-key",
+            "value": "{{bridgeApiKey}}",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"ping\"\n}"
+        },
+        "url": "{{baseUrl}}/command"
+      }
+    },
+    {
+      "name": "POST /command health-shopify",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "x-bridge-api-key",
+            "value": "{{bridgeApiKey}}",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"health-shopify\"\n}"
+        },
+        "url": "{{baseUrl}}/command"
+      }
+    },
+    {
+      "name": "POST /command graphql",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "x-bridge-api-key",
+            "value": "{{bridgeApiKey}}",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"graphql\",\n  \"query\": \"query { shop { name myshopifyDomain } }\"\n}"
+        },
+        "url": "{{baseUrl}}/command"
+      }
+    }
+  ]
+}
