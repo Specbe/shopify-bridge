@@ -16,8 +16,13 @@ app.get("/health", (_req, res) => {
 app.post("/command", (req, res) => {
   res.status(200).json({
     ok: true,
+    route: "/command",
     body: req.body ?? null
   });
+});
+
+app.use((req, res) => {
+  res.status(404).send("Not Found");
 });
 
 app.listen(PORT, "0.0.0.0", () => {
