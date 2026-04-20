@@ -1,46 +1,78 @@
 import express from "express";
 import fetch from "node-fetch";
 
+console.log("Bridge starting...");
+
 const app = express();
 app.use(express.json());
+
+app.use((req, res, next) => {
+  console.log("Incoming:", req.method, req.url);
+  next();
+});
 
 const SHOP = process.env.SHOPIFY_STORE_DOMAIN;
 const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
-const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY;
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
 
-app.get("/", (req, res) => res.status(200).send("OK"));
-app.get("/health", (req, res) => res.status(200).json({ status: "alive" }));
+app.get("/", (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: "shopify-bridge",
+    status: "running"
+  });
+});
 
-app.post("/command", async (req, res) => {
+app.get("/health", (_req, res) => {
+  res.status(200).send("ok");
+});
+
+app.get("/shopify-test", async (_req, res) => {
   try {
-    if (req.headers["x-bridge-api-key"] !== BRIDGE_API_KEY) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
-
-    const { action } = req.body || {};
-
-    if (!SHOP) return res.status(500).json({ ok: false, error: "Missing SHOPIFY_STORE_DOMAIN" });
-    if (!TOKEN) return res.status(500).json({ ok: false, error: "Missing SHOPIFY_ACCESS_TOKEN" });
-
-    if (action === "health-shopify") {
-      return res.status(200).json({
-        ok: true,
-        status: "ok",
-        shop: SHOP,
-        api_version: API_VERSION
+    if (!SHOP || !TOKEN) {
+      return res.status(500).json({
+        ok: false,
+        error: "Missing SHOPIFY_STORE_DOMAIN or SHOPIFY_ACCESS_TOKEN"
       });
     }
 
-    return res.status(400).json({ ok: false, error: "Unknown action" });
+    const url = `https://${SHOP}/admin/api/${API_VERSION}/shop.json`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "X-Shopify-Access-Token": TOKEN,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const text = await response.text();
+
+    return res.status(response.status).type("application/json").send(text);
   } catch (error) {
+    console.error("Shopify test error:", error);
     return res.status(500).json({
       ok: false,
-      error: "Server error",
-      message: error.message
+      error: error instanceof Error ? error.message : "Unknown error"
     });
   }
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "Route not found",
+    path: req.originalUrl
+  });
+});
+
+app.use((error, _req, res, _next) => {
+  console.error("Unhandled error:", error);
+  res.status(500).json({
+    ok: false,
+    error: error instanceof Error ? error.message : "Internal server error"
+  });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
