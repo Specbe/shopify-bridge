@@ -211,28 +211,52 @@ async function handleCommand(raw) {
 
     return { ok: true, command, result: data.productUpdate };
   }
+if (command.startsWith("set-price ")) {
+  const rest = command.replace(/^set-price\s+/, "").trim();
+  const parts = rest.split(/\s+/);
 
-  if (command.startsWith("set-price ")) {
-    const rest = command.replace(/^set-price\s+/, "").trim();
-    const parts = rest.split(/\s+/);
-    if (parts.length < 2) throw new Error("Use: set-price VARIANT_ID PRICE");
-    const variantId = parts[0];
-    const price = parts[1];
+  if (parts.length < 2) {
+    throw new Error("Use: set-price VARIANT_ID PRICE");
+  }
 
-    const data = await shopifyGraphQL(`
-      mutation UpdateVariant($input: ProductVariantInput!) {
-        productVariantUpdate(input: $input) {
-          productVariant {
-            id
-            title
-            price
-          }
-          userErrors {
-            field
-            message
-          }
+  const variantId = parts[0];
+  const price = parts[1];
+
+  const data = await shopifyGraphQL(`
+    mutation productVariantsBulkUpdate($variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(variants: $variants) {
+        productVariants {
+          id
+          price
+        }
+        userErrors {
+          field
+          message
         }
       }
+    }
+  `, {
+    variants: [
+      {
+        id: variantGid(variantId),
+        price: price
+      }
+    ]
+  });
+
+  const errors = data.productVariantsBulkUpdate.userErrors || [];
+
+  if (errors.length) {
+    throw new Error(JSON.stringify(errors));
+  }
+
+  return {
+    ok: true,
+    command,
+    result: data.productVariantsBulkUpdate.productVariants
+  };
+}
+ 
     `, {
       input: {
         id: variantGid(variantId),
