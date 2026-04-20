@@ -1,91 +1,71 @@
-// Improved Shopify Bridge
+// Import necessary modules using ES6 syntax
+import express from 'express';
+import { json } from 'body-parser';
+import request from 'request';
+import winston from 'winston';
 
-require('dotenv').config();
-const express = require('express');
 const app = express();
-const winston = require('winston');
+const PORT = process.env.PORT || 3000;
+const TIMEOUT = 5000;  // Timeout in milliseconds
 
-// Logger configuration
+// Setup error logging
 const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.timestamp(),
-        winston.format.printf(({ timestamp, level, message }) => {
-            return `${timestamp} ${level}: ${message}`;
-        })
-    ),
+    level: 'error',
+    format: winston.format.json(),
     transports: [
-        new winston.transports.Console(),
+        new winston.transports.File({ filename: 'error.log' })
     ],
 });
 
-// Environment variable validation
-const requiredEnvVars = ['API_KEY', 'API_SECRET'];
-requiredEnvVars.forEach(varName => {
-    if (!process.env[varName]) {
-        logger.error(`Missing environment variable: ${varName}`);
-        process.exit(1);
-    }
-});
+// Middleware to handle JSON requests
+app.use(json());
 
-// Request ID tracking
+// Request tracking middleware
 app.use((req, res, next) => {
-    req.requestId = Math.random().toString(36).substr(2, 9);
-    logger.info(`Request ID: ${req.requestId}`);
+    const requestId = req.headers['x-request-id'] || Date.now();
+    logger.info(`Request ID: ${requestId} - ${req.method} ${req.url}`);
+    res.setHeader('X-Request-Id', requestId);
     next();
 });
 
-// Graceful shutdown handling
-const server = app.listen(process.env.PORT || 3000, () => {
-    logger.info(`Server started on port ${process.env.PORT || 3000}`);
-});
+// Route handling
+app.post('/shopify-bridge', (req, res) => {
+    const { shop, data } = req.body;
 
-process.on('SIGTERM', () => {
-    logger.info('SIGTERM signal received: closing HTTP server');
-    server.close(() => {
-        logger.info('HTTP server closed');
-        process.exit(0);
+    // Example error handling
+    if (!shop || !data) {
+        logger.error('Missing required fields in request body');
+        return res.status(400).send('Bad Request: Missing required fields');
+    }
+
+    // Simulate processing the request with a timeout
+    const timeoutId = setTimeout(() => {
+        logger.error('Request processing timeout');
+        res.status(504).send('Gateway Timeout');
+    }, TIMEOUT);
+
+    // Simulate sending a request to Shopify
+    request({ /* your request options */ }, (error, response, body) => {
+        clearTimeout(timeoutId);
+
+        if (error) {
+            logger.error(`Error during request to Shopify: ${error.message}`);
+            return res.status(500).send('Internal Server Error');
+        }
+
+        res.status(response.statusCode).send(body);
     });
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+// Diagnostic on startup
+app.listen(PORT, () => {
+    logger.info(`Server started on port ${PORT}.`);
 });
 
-// Example route with comprehensive error handling
-app.get('/some-endpoint', (req, res) => {
-    // Simulate some processing that could fail
-    try {
-        // Your business logic here
-        throw new Error('Simulated error for demonstration');
-    } catch (error) {
-        logger.error(`Error in /some-endpoint: ${error.message}`);
-        res.status(500).json({
-            requestId: req.requestId,
-            message: 'Internal Server Error',
-            error: error.message,
-        });
-    }
-});
-
-// Example route with timeout protection
-app.get('/another-endpoint', (req, res) => {
-    const timeout = setTimeout(() => {
-        logger.warn(`Request ${req.requestId} timed out`);
-        res.status(504).json({
-            requestId: req.requestId,
-            message: 'Request Timeout'
-        });
-    }, 5000); // 5 seconds timeout
-
-    // Simulated processing
-    setTimeout(() => {
-        clearTimeout(timeout);
-        res.json({
-            requestId: req.requestId,
-            message: 'Success!'
-        });
-    }, 3000); // Simulated delay
-});
-
+// Graceful shutdown
+const shutdown = () => {
+    logger.info('Shutting down gracefully...');
+    process.exit(0);
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
