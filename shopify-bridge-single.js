@@ -1,99 +1,91 @@
-import express from "express";
-import fetch from "node-fetch";
+// Improved Shopify Bridge
 
+require('dotenv').config();
+const express = require('express');
 const app = express();
+const winston = require('winston');
 
-const SHOP = process.env.SHOPIFY_STORE_DOMAIN;
-const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
-const PORT = Number(process.env.PORT || 3000);
+// Logger configuration
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.timestamp(),
+        winston.format.printf(({ timestamp, level, message }) => {
+            return `${timestamp} ${level}: ${message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console(),
+    ],
+});
 
-app.use(express.json({ limit: "1mb" }));
+// Environment variable validation
+const requiredEnvVars = ['API_KEY', 'API_SECRET'];
+requiredEnvVars.forEach(varName => {
+    if (!process.env[varName]) {
+        logger.error(`Missing environment variable: ${varName}`);
+        process.exit(1);
+    }
+});
 
+// Request ID tracking
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  next();
+    req.requestId = Math.random().toString(36).substr(2, 9);
+    logger.info(`Request ID: ${req.requestId}`);
+    next();
 });
 
-app.get("/", (_req, res) => {
-  res.status(200).json({
-    ok: true,
-    service: "shopify-bridge",
-    status: "running"
-  });
+// Graceful shutdown handling
+const server = app.listen(process.env.PORT || 3000, () => {
+    logger.info(`Server started on port ${process.env.PORT || 3000}`);
 });
 
-app.get("/health", (_req, res) => {
-  res.status(200).json({
-    ok: true,
-    status: "healthy"
-  });
+process.on('SIGTERM', () => {
+    logger.info('SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+    });
 });
 
-app.post("/command", async (req, res) => {
-  try {
-    const action = req.body?.action || req.body?.command;
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
-    if (!action) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing action or command in request body"
-      });
-    }
-
-    if (action === "health-shopify" || action === "health") {
-      if (!SHOP || !TOKEN) {
-        return res.status(500).json({
-          ok: false,
-          error: "Missing SHOPIFY_STORE_DOMAIN or SHOPIFY_ACCESS_TOKEN"
+// Example route with comprehensive error handling
+app.get('/some-endpoint', (req, res) => {
+    // Simulate some processing that could fail
+    try {
+        // Your business logic here
+        throw new Error('Simulated error for demonstration');
+    } catch (error) {
+        logger.error(`Error in /some-endpoint: ${error.message}`);
+        res.status(500).json({
+            requestId: req.requestId,
+            message: 'Internal Server Error',
+            error: error.message,
         });
-      }
-
-      const url = `https://${SHOP}/admin/api/${API_VERSION}/shop.json`;
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "X-Shopify-Access-Token": TOKEN,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        }
-      });
-
-      const text = await response.text();
-
-      return res.status(response.status).type("application/json").send(text);
     }
-
-    return res.status(400).json({
-      ok: false,
-      error: `Unsupported action: ${action}`
-    });
-  } catch (error) {
-    console.error("POST /command error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error instanceof Error ? error.message : "Unknown server error"
-    });
-  }
 });
 
-app.use((req, res) => {
-  res.status(404).json({
-    ok: false,
-    error: "Route not found",
-    path: req.originalUrl
-  });
+// Example route with timeout protection
+app.get('/another-endpoint', (req, res) => {
+    const timeout = setTimeout(() => {
+        logger.warn(`Request ${req.requestId} timed out`);
+        res.status(504).json({
+            requestId: req.requestId,
+            message: 'Request Timeout'
+        });
+    }, 5000); // 5 seconds timeout
+
+    // Simulated processing
+    setTimeout(() => {
+        clearTimeout(timeout);
+        res.json({
+            requestId: req.requestId,
+            message: 'Success!'
+        });
+    }, 3000); // Simulated delay
 });
 
-app.use((error, _req, res, _next) => {
-  console.error("Unhandled application error:", error);
-  return res.status(500).json({
-    ok: false,
-    error: error instanceof Error ? error.message : "Internal server error"
-  });
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
