@@ -121,53 +121,40 @@ async function handleCommand(raw) {
     return { ok: true, command, shop: data.shop };
   }
 
-  if (command.startsWith("get-product ")) {
-    const id = command.replace(/^get-product\s+/, "").trim();
+  if (command.startsWith("products")) {
+    const parts = command.split(/\s+/);
+    const limit = Math.max(1, Math.min(50, Number(parts[1] || 10)));
+
     const data = await shopifyGraphQL(`
-      query GetProduct($id: ID!) {
-        product(id: $id) {
-          id
-          title
-          handle
-          status
-          vendor
-          tags
-          descriptionHtml
-          variants(first: 10) {
-            nodes {
-              id
-              title
-              price
-              inventoryQuantity
+      query Products($first: Int!) {
+        products(first: $first) {
+          nodes {
+            id
+            title
+            variants(first: 1) {
+              nodes {
+                id
+                price
+              }
             }
           }
         }
       }
-    `, { id: productGid(id) });
+    `, { first: limit });
 
-    return { ok: true, command, product: data.product };
+    return { ok: true, command, products: data.products.nodes };
   }
 
   if (command.startsWith("set-title ")) {
     const rest = command.replace(/^set-title\s+/, "");
     const firstSpace = rest.indexOf(" ");
-    if (firstSpace === -1) throw new Error("Use: set-title PRODUCT_ID New Title");
     const id = rest.slice(0, firstSpace).trim();
     const title = rest.slice(firstSpace + 1).trim();
 
     const data = await shopifyGraphQL(`
-      mutation UpdateProduct($input: ProductInput!) {
+      mutation ($input: ProductInput!) {
         productUpdate(input: $input) {
-          product {
-            id
-            title
-            handle
-            status
-          }
-          userErrors {
-            field
-            message
-          }
+          product { id title }
         }
       }
     `, {
@@ -180,119 +167,32 @@ async function handleCommand(raw) {
     return { ok: true, command, result: data.productUpdate };
   }
 
-  if (command.startsWith("set-tags ")) {
-    const rest = command.replace(/^set-tags\s+/, "");
-    const firstSpace = rest.indexOf(" ");
-    if (firstSpace === -1) throw new Error("Use: set-tags PRODUCT_ID tag1, tag2");
-    const id = rest.slice(0, firstSpace).trim();
-    const tagsRaw = rest.slice(firstSpace + 1).trim();
-    const tags = tagsRaw.split(",").map(s => s.trim()).filter(Boolean);
+  if (command.startsWith("set-price ")) {
+    const rest = command.replace(/^set-price\s+/, "").trim();
+    const [variantId, price] = rest.split(/\s+/);
 
     const data = await shopifyGraphQL(`
-      mutation UpdateProduct($input: ProductInput!) {
-        productUpdate(input: $input) {
-          product {
+      mutation ($variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(variants: $variants) {
+          productVariants {
             id
-            title
-            tags
+            price
           }
           userErrors {
-            field
             message
           }
         }
       }
     `, {
-      input: {
-        id: productGid(id),
-        tags
-      }
+      variants: [
+        {
+          id: variantGid(variantId),
+          price: price
+        }
+      ]
     });
 
-    return { ok: true, command, result: data.productUpdate };
-  }
-if (command.startsWith("set-price ")) {
-  const rest = command.replace(/^set-price\s+/, "").trim();
-  const parts = rest.split(/\s+/);
-
-  if (parts.length < 2) {
-    throw new Error("Use: set-price VARIANT_ID PRICE");
-  }
-
-  const variantId = parts[0];
-  const price = parts[1];
-
-  const data = await shopifyGraphQL(`
-    mutation productVariantsBulkUpdate($variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(variants: $variants) {
-        productVariants {
-          id
-          price
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `, {
-    variants: [
-      {
-        id: variantGid(variantId),
-        price: price
-      }
-    ]
-  });
-
-  const errors = data.productVariantsBulkUpdate.userErrors || [];
-
-  if (errors.length) {
-    throw new Error(JSON.stringify(errors));
-  }
-
-  return {
-    ok: true,
-    command,
-    result: data.productVariantsBulkUpdate.productVariants
-  };
-}
- 
-    `, {
-      input: {
-        id: variantGid(variantId),
-        price
-      }
-    });
-
-    return { ok: true, command, result: data.productVariantUpdate };
-  }
-
-  if (command.startsWith("products")) {
-    const parts = command.split(/\s+/);
-    const limit = Math.max(1, Math.min(50, Number(parts[1] || 10)));
-
-    const data = await shopifyGraphQL(`
-      query Products($first: Int!) {
-        products(first: $first, sortKey: UPDATED_AT, reverse: true) {
-          nodes {
-            id
-            title
-            handle
-            status
-            totalInventory
-            variants(first: 5) {
-              nodes {
-                id
-                title
-                price
-              }
-            }
-          }
-        }
-      }
-    `, { first: limit });
-
-    return { ok: true, command, products: data.products.nodes };
+    return { ok: true, command, result: data.productVariantsBulkUpdate };
   }
 
   throw new Error("Unknown command");
@@ -302,34 +202,20 @@ const server = http.createServer(async (req, res) => {
   try {
     const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
 
-    if (req.method === "GET" && parsedUrl.pathname === "/health") {
-      return json(res, 200, {
-        ok: true,
-        service: "shopify-bridge-single",
-        port: PORT,
-        store: STORE_DOMAIN || null,
-        apiVersion: API_VERSION
-      });
-    }
-
     if (req.method === "POST" && parsedUrl.pathname === "/command") {
-      const apiKey = req.headers["x-bridge-api-key"];
-      if (!apiKey || apiKey !== BRIDGE_API_KEY) {
+      if (req.headers["x-bridge-api-key"] !== BRIDGE_API_KEY) {
         return json(res, 401, { ok: false, error: "Unauthorized" });
       }
 
-      const raw = await readBody(req);
-      const body = raw ? JSON.parse(raw) : {};
+      const body = JSON.parse(await readBody(req));
       const result = await handleCommand(body.command);
       return json(res, 200, result);
     }
 
-    return json(res, 404, { ok: false, error: "Not found" });
-  } catch (error) {
-    return json(res, 500, { ok: false, error: error.message || String(error) });
+    return json(res, 404, { ok: false });
+  } catch (e) {
+    return json(res, 500, { ok: false, error: e.message });
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Shopify bridge listening on http://localhost:${PORT}`);
-});
+server.listen(PORT);
